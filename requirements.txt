@@ -1,0 +1,6 @@
+# Phase 0 — shared contracts only.
+# Track A and Track B will each add their own requirements-a.txt /
+# requirements-b.txt from Phase 1 onward (FastAPI, LangGraph, etc.)
+# so neither of you drags in the other's dependencies unnecessarily.
+pydantic>=2.6
+pytest>=8.0

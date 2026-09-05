@@ -1,0 +1,35 @@
+# Skeleton only as of Phase 0. Track A adds postgres/redis + its own
+# service block starting Phase 1-2; Track B adds its service block once
+# track-b-agent/ has a real app. Full wiring happens in Phase 5.
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: agentsandbox
+      POSTGRES_PASSWORD: agentsandbox
+      POSTGRES_DB: agentsandbox
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  # track-a-guardrail:
+  #   build: ./track-a-guardrail
+  #   ports: ["8001:8000"]
+  #   depends_on: [postgres, redis]
+
+  # track-b-agent:
+  #   build: ./track-b-agent
+  #   ports: ["8501:8501"]
+  #   depends_on: [track-a-guardrail]
+
+volumes:
+  pgdata:
