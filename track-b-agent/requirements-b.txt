@@ -1,0 +1,4 @@
+langgraph>=0.2
+requests>=2.31
+anthropic>=0.40   # only needed if ANTHROPIC_API_KEY is set; planner falls
+                  # back to a rule-based planner offline otherwise
