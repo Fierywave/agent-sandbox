@@ -128,13 +128,53 @@ class Planner:
             )
             return Plan(task_id=task_id, steps=[step])
 
+        if "create_ticket" in self.tools_by_name and re.search(
+            r"\b(create a ticket|file a ticket|open a ticket|create ticket)\b",
+            user_message,
+            re.IGNORECASE,
+        ):
+            title_match = re.search(r"titled? ['\"]([^'\"]+)['\"]", user_message, re.IGNORECASE)
+            desc_match = re.search(
+                r"description(?:d)? ['\"]([^'\"]+)['\"]", user_message, re.IGNORECASE
+            )
+            title = title_match.group(1) if title_match else "Untitled ticket"
+            description = desc_match.group(1) if desc_match else user_message.strip()
+            tool = self.tools_by_name["create_ticket"]
+            step = ToolCall(
+                tool_name="create_ticket",
+                arguments={"title": title, "description": description},
+                reasoning=f"User asked to create a ticket titled '{title}'",
+                risk_level=tool.risk_level,
+                requires_approval=tool.requires_approval,
+            )
+            return Plan(task_id=task_id, steps=[step])
+
+        if "csv_query" in self.tools_by_name and re.search(
+            r"\b(look ?up|find|search)\b.*\b(customer|account)\b", user_message, re.IGNORECASE
+        ):
+            id_match = re.search(r"\bC\d{3}\b", user_message)
+            tool = self.tools_by_name["csv_query"]
+            if id_match:
+                filter_ = {"customer_id": id_match.group()}
+                reasoning = f"User asked to look up customer '{id_match.group()}'"
+            else:
+                filter_ = {}
+                reasoning = "User asked to look up customer data with no specific ID given"
+            step = ToolCall(
+                tool_name="csv_query",
+                arguments={"dataset": "customers", "filter": filter_},
+                reasoning=reasoning,
+                risk_level=tool.risk_level,
+                requires_approval=tool.requires_approval,
+            )
+            return Plan(task_id=task_id, steps=[step])
+
         return Plan(
             task_id=task_id,
             steps=[],
             final_answer_if_no_tool_needed=(
-                "I couldn't map this request to a tool. Phase 1 only wires up "
-                "calculator and file_reader — try asking a math question or "
-                "asking to read a doc."
+                "I couldn't map this request to a tool. Try a math question, "
+                "asking to read a doc, looking up a customer, or creating a ticket."
             ),
         )
 

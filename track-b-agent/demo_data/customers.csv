@@ -1,0 +1,9 @@
+customer_id,name,email,plan,status
+C001,Alice Nguyen,alice@example.com,pro,active
+C002,Bob Martinez,bob@example.com,free,active
+C003,Chen Wei,chen@example.com,pro,past_due
+C004,Dana Osei,dana@example.com,enterprise,active
+C005,Elena Petrova,elena@example.com,free,cancelled
+C006,Farid Hassan,farid@example.com,pro,active
+C007,Grace Kim,grace@example.com,enterprise,active
+C008,Hana Suzuki,hana@example.com,free,active

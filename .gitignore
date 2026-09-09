@@ -7,3 +7,5 @@ venv/
 *.sqlite3
 .pytest_cache/
 .DS_Store
+
+track-b-agent/pending_approvals.json
