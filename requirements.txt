@@ -1,7 +1,3 @@
-# Phase 0 — shared contracts only.
-# Track A and Track B will each add their own requirements-a.txt /
-# requirements-b.txt from Phase 1 onward (FastAPI, LangGraph, etc.)
-# so neither of you drags in the other's dependencies unnecessarily.
 pydantic>=2.6
 pytest>=8.0
 fastapi>=0.110.0
@@ -9,3 +5,6 @@ uvicorn[standard]>=0.28.0
 pyjwt>=2.8.0
 cryptography>=42.0.0
 httpx>=0.27.0
+langgraph>=0.2
+langgraph-checkpoint-sqlite>=2.0
+requests>=2.31

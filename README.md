@@ -1,171 +1,167 @@
+<div align="center">
+
 # Permissioned Tool-Using Agent Sandbox
+### Governed Multi-Tool Agent Runtime with Deterministic RBAC, Rate Limiting & Human-in-the-Loop Approval
 
-> **Core Philosophy:** *The model proposes, the system disposes.*
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-FF6F00?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![Pydantic](https://img.shields.io/badge/Validation-Pydantic%20v2-E92063?style=for-the-badge&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
+[![Auth](https://img.shields.io/badge/Auth-OAuth2%20%2B%20JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white)](https://jwt.io/)
+[![Testing](https://img.shields.io/badge/Test%20Suite-pytest-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white)](https://docs.pytest.org/)
 
-A production-grade, security-hardened agent runtime environment. While large language models can propose actions across file systems, calculators, data querying engines, and ticketing APIs, every tool invocation is strictly gated by **deterministic role-based access control (RBAC)**, **risk tiers**, **sliding-window rate limits**, and **human-in-the-loop approvals**, backed by an immutable **audit trail** and **observability traces**.
+<p align="center">
+  A security-hardened agent environment where an LLM can plan and use tools (sandboxed file inspection, data calculations, CSV aggregation, and ticketing APIs), but every invocation is strictly gated by role-based authorization, risk classification, sliding-window rate limits, and cryptographic audit logs. Built on an explicit state machine that supports persistent pause-and-resume for human-in-the-loop approvals across distinct processes.
+</p>
 
----
-
-## The Problem and Architectural Thesis
-
-Standard agent implementations grant autonomous models direct execution access to tools, relying on prompt instructions alone to enforce safety boundaries. This approach fails in production:
-- **Prompt injection** can coerce models into executing privileged functions.
-- **Hallucinated or corrupted parameters** lead to destructive commands.
-- **Runaway agent loops** incur unexpected latency and API exhaustion.
-- **Unverified model intent** bypasses organizational compliance and security policies.
-
-This platform treats all LLM outputs as **untrusted proposals**. Security and authorization decisions are enforced deterministically by an independent guardrail layer before any tool execution occurs.
+[System Architecture](#system-architecture) • [Governance & Multi-Tier RBAC](#governance--multi-tier-rbac) • [Platform Modules](#key-platform-capabilities) • [Setup & Execution Guide](#cross-platform-setup--execution-guide) • [API Reference](#api-reference) • [License](#license)
 
 ---
+
+</div>
 
 ## System Architecture
 
-```
-                      +----------------------------------+
-                      |         User / Client            |
-                      +-----------------+----------------+
-                                        |
-                                        v
-                      +----------------------------------+
-                      |      LangGraph State Machine     |
-                      |          (Track B: Agent)        |
-                      +-----------------+----------------+
-                                        |
-                            Proposes ToolCall (Plan)
-                                        |
-                                        v
-+---------------------------------------------------------------------------------+
-|                         Track A: The Guardrail Service                          |
-|                                                                                 |
-|  1. Authentication & Role Claims                                                |
-|     `Authorization: Bearer <JWT>` -> Resolves UserContext & Role                |
-|                                                                                 |
-|  2. Tool Registry Verification                                                  |
-|     Validates tool existence against registry seed (`GET /tools`)               |
-|                                                                                 |
-|  3. Deterministic Argument Validation                                           |
-|     Validates arguments against JSON schema (missing fields, unexpected keys)   |
-|                                                                                 |
-|  4. Role-Based Access Control (RBAC)                                            |
-|     Enforces tool allowed_roles (viewer / analyst / operator / admin)           |
-|                                                                                 |
-|  5. Risk Tier Policy Engine                                                     |
-|     Enforces ROLE_MAX_RISK ceiling against tool risk classification             |
-|                                                                                 |
-|  6. Human-in-the-Loop Approval Gateway                                          |
-|     High-risk actions pause execution state awaiting operator/admin sign-off   |
-|                                                                                 |
-|  7. Sliding-Window Rate Limiting                                                |
-|     Throttles per-role, per-tool request velocity                              |
-|                                                                                 |
-|  8. Structured Audit Event Dispatch                                             |
-|     Emits immutable audit record for every decision                             |
-+---------------------------------------------------------------------------------+
-                                        |
-                      +-----------------+-----------------+
-                      |                                   |
-              [ Decision: ALLOWED ]               [ Decision: DENIED ]
-                      |                                   |
-                      v                                   v
-             Executes Tool in                   Rejects Request with
-            Sandboxed Runtime                   Detailed Security Audit
-```
+The core tenet of this sandbox is simple: **the model proposes, the system disposes**. The LLM is treated as an untrusted reasoning engine whose proposed actions must pass through deterministic policy gates before execution is ever permitted.
 
----
+```mermaid
+graph TD
+    subgraph ClientAndAgent ["Client & Agent Layer (LangGraph)"]
+        User["User / Client Request"]
+        Intake["Intake Node"]
+        Planner["Planner Node (LLM / Rule-Based)"]
+        ToolSelect["Tool Selection Node"]
+        ExecNode["Tool Execution Node"]
+        ReflectNode["Reflection Node"]
+        FinalNode["Final Response Node"]
+        User --> Intake
+        Intake --> Planner
+        Planner --> ToolSelect
+    end
 
-## Governance Model
+    subgraph GuardrailLayer ["Guardrail & Security Layer (FastAPI)"]
+        JWTVerify["JWT Auth & Role Extraction"]
+        RegistryCheck["Registry Verification (GET /tools)"]
+        SchemaValidator["Pydantic Schema Validation"]
+        RBACEngine["RBAC & Risk-Tier Policy Engine"]
+        RateLimitEngine["Sliding-Window Rate Limiter"]
+        ApprovalGate["Approval Gateway (Operator / Admin Only)"]
+        AuditLogger["Audit Event Dispatcher"]
 
-### 1. Role Hierarchy (RBAC)
+        ToolSelect --> JWTVerify
+        JWTVerify --> RegistryCheck
+        RegistryCheck --> SchemaValidator
+        SchemaValidator --> RBACEngine
+        RBACEngine --> RateLimitEngine
+        RateLimitEngine --> ApprovalGate
+        ApprovalGate --> AuditLogger
+    end
 
-Every caller is authenticated via JWT containing signed role claims. The system defines four distinct privilege tiers:
+    subgraph ExecutionAndStorage ["Execution & State Persistence"]
+        Checkpointer[("LangGraph SQLite Checkpoint")]
+        ApprovalStore[("Pending Approvals Store")]
+        AuditStore[("Immutable Audit Trail")]
+        ToolRuntime["Sandboxed Tool Runtime (Calculator, CSV, File, Tickets)"]
 
-| Role | Permitted Actions | Maximum Risk Tier Allowed |
-|---|---|---|
-| `viewer` | Read-only inspection, calculations, basic discovery | `LOW` |
-| `analyst` | Data aggregation, dataset querying, statistical evaluation | `MEDIUM` |
-| `operator` | Operational workflows, ticket generation (subject to approval) | `HIGH` |
-| `admin` | Full system execution, policy override, approval authority | `HIGH` |
-
-### 2. Risk Tiers and Execution Policies
-
-Every registered tool is statically categorized by risk tier:
-
-| Tier | Policy | Action on Violation |
-|---|---|---|
-| `LOW` | Auto-executed for all authorized roles. | Blocked if role not in `allowed_roles`. |
-| `MEDIUM` | Auto-executed for `analyst`, `operator`, `admin`. Strictly rate-limited. | Blocked for `viewer`. |
-| `HIGH` | Execution halted; task transitions to `WAITING_APPROVAL`. Requires human sign-off. | Blocked for `viewer` and `analyst`. |
-
-### 3. Starter Tool Registry
-
-| Tool | Risk Tier | Allowed Roles | Requires Human Approval | Description |
-|---|---|---|---|---|
-| `calculator` | `LOW` | `viewer`, `analyst`, `operator`, `admin` | No | Evaluates mathematical expressions safely. |
-| `file_reader` | `LOW` | `viewer`, `analyst`, `operator`, `admin` | No | Reads sandboxed documentation files. |
-| `mock_search` | `LOW` | `viewer`, `analyst`, `operator`, `admin` | No | Queries simulated search index. |
-| `csv_query` | `MEDIUM` | `analyst`, `operator`, `admin` | No | Filters and aggregates demo CSV datasets. |
-| `create_ticket` | `HIGH` | `operator`, `admin` | Yes | Submits incident tickets via ticketing API. |
-
----
-
-## Repository Structure
-
-```
-agent-sandbox/
-├── contracts/                  # Shared Pydantic contracts and protocol definitions
-│   ├── __init__.py             # Central re-exports of schemas and enums
-│   ├── audit_event.py          # AuditEvent schema (decision, latency, approver)
-│   ├── enums.py                # Role, RiskLevel, WorkflowStatus, Decisions
-│   ├── plan.py                 # ToolCall and Plan schemas emitted by planners
-│   ├── tool_registry.py        # ToolDefinition, ToolRegistryResponse, STARTER_TOOLS
-│   └── workflow_state.py       # WorkflowState model for LangGraph state persistence
-├── track-a-guardrail/          # Track A: Security, permissions, and registry service
-│   ├── __init__.py             # Public package exports
-│   ├── auth.py                 # OAuth2/JWT issuance, verification, role hierarchy
-│   ├── main.py                 # FastAPI application entry point and routing
-│   ├── permissions.py          # Deterministic RBAC and risk policy evaluation
-│   └── registry.py             # Tool registry store and query endpoints
-├── track-b-agent/              # Track B: LangGraph state machine, planner, and tools
-│   └── README.md
-├── tests/                      # Comprehensive test suite
-│   ├── test_contracts.py       # Serialization and schema compatibility tests
-│   └── test_track_a_phase1.py  # Guardrail RBAC, JWT, and permissions test suite
-├── docker-compose.yml          # Containerized local orchestration (Postgres, Redis)
-└── requirements.txt            # Unified dependencies
+        ApprovalGate -- "High Risk: Pause (interrupt)" --> Checkpointer
+        ApprovalGate -- "Record Pending Request" --> ApprovalStore
+        ApprovalGate -- "Sign-off Received: Resume" --> ExecNode
+        RateLimitEngine -- "Quota Exceeded (HTTP 429)" --> AuditLogger
+        AuditLogger --> AuditStore
+        ExecNode --> ToolRuntime
+        ToolRuntime --> ReflectNode
+        ReflectNode --> FinalNode
+    end
 ```
 
 ---
 
-## Quickstart Guide
+## Key Platform Capabilities
+
+| Module | Core Functionality | Security & Operational Value |
+| :--- | :--- | :--- |
+| **Tool Registry & Schemas** | Static catalog of verified tools exposing input/output JSON schemas, risk tiers, and role limits. | Eliminates blind execution by enforcing typed Pydantic contracts on all arguments before calling tools. |
+| **Role-Based Access Control** | Token-level verification mapping callers to Viewer, Analyst, Operator, or Admin tiers. | Decouples permissions from model prompt instructions; authorization lives entirely in system code. |
+| **Risk-Tier Policy Engine** | Hierarchical ceilings (Low, Medium, High) matched against tool risk categories. | Restricts destructive tools to elevated roles regardless of how persuasively the LLM reasons. |
+| **Sliding-Window Rate Limiter** | In-memory 60-second sliding counters enforcing call velocity per tool and per role. | Prevents runaway agent loops, abusive bursts, and denial-of-service against downstream APIs. |
+| **Human-in-the-Loop Gateway** | Real process pause using LangGraph state checkpointing and isolated approval queues. | High-risk actions halt and survive process restarts until explicitly approved or rejected by an operator. |
+| **Immutable Audit Logging** | Complete telemetry capturing timestamps, user roles, arguments, decisions, and latencies. | Full post-mortem traceability answering exactly why an action was executed, blocked, or altered. |
+
+---
+
+## Governance & Multi-Tier RBAC
+
+Every inbound tool proposal is evaluated against the caller's verified JWT role claims. The system defines four hierarchical tiers with strict risk ceilings:
+
+```
+                            [ LEVEL 1: ADMIN ]
+                                    |
+                            [ LEVEL 2: OPERATOR ]
+                                    |
+                            [ LEVEL 3: ANALYST ]
+                                    |
+                            [ LEVEL 4: VIEWER ]
+```
+
+| Role & Tier | Maximum Allowed Risk | Permitted Operations | Human Approval Rights | Rate Limit Tier |
+| :--- | :---: | :--- | :---: | :---: |
+| **Admin** | High | System administration, policy overrides, all tools | Full Approval Authority | Highest |
+| **Operator** | High | Ticket management, infrastructure operations, all tools | Full Approval Authority | Standard Operations |
+| **Analyst** | Medium | CSV datasets, data aggregation, math, search, file reading | None (Restricted) | Analytical Quota |
+| **Viewer** | Low | Sandboxed file reading, basic math, mock search index | None (Restricted) | Minimal Read-Only |
+
+---
+
+## Starter Tool Specifications
+
+Every tool available to the agent runtime is statically registered with typed schemas and operational policies:
+
+| Tool Identifier | Risk Classification | Permitted Roles | Requires Human Sign-Off | Rate Limit (Calls / Min) | Intended Workflow |
+| :--- | :---: | :--- | :---: | :--- | :--- |
+| `calculator` | Low | Viewer, Analyst, Operator, Admin | No | Viewer: 30 / Analyst: 60 / Operator: 60 / Admin: 120 | Evaluates mathematical expressions safely. |
+| `file_reader` | Low | Viewer, Analyst, Operator, Admin | No | Viewer: 30 / Analyst: 60 / Operator: 60 / Admin: 120 | Reads sandboxed documentation from a verified folder. |
+| `mock_search` | Low | Viewer, Analyst, Operator, Admin | No | Viewer: 20 / Analyst: 40 / Operator: 40 / Admin: 80 | Queries stubbed web knowledge index. |
+| `csv_query` | Medium | Analyst, Operator, Admin | No | Analyst: 20 / Operator: 30 / Admin: 60 | Performs structured lookups across business CSV datasets. |
+| `create_ticket` | High | Operator, Admin | Yes | Operator: 10 / Admin: 20 | Submits incident tickets to external ticketing systems. |
+
+---
+
+## Cross-Platform Setup & Execution Guide
+
+Follow these instructions to run the sandbox and its test suite on any Windows, macOS, or Linux system.
 
 ### Prerequisites
 
-- Python 3.11+
-- Virtual environment (`venv`)
+- **Python 3.11+** installed and added to your system PATH
+- **Git**
 
-### Installation
-
-1. Create and activate a virtual environment:
-
+### 1. Clone the Repository
 ```bash
-# macOS / Linux
-python3 -m venv .venv
-source .venv/bin/activate
+git clone https://github.com/Fierywave/agent-sandbox.git
+cd agent-sandbox
+```
 
-# Windows (PowerShell)
+### 2. Configure Virtual Environment
+
+#### On Windows (PowerShell)
+```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-2. Install dependencies:
+#### On macOS / Linux (Bash or Zsh)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
 
+### 3. Install Unified Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### Running the Test Suite
-
-Execute the test suite to verify contract serialization, JWT issuance, and RBAC enforcement:
+### 4. Run the Full Test Suite
+The repository includes comprehensive test suites covering shared contracts, Guardrail RBAC and rate limiting, and LangGraph persistent state pause/resume:
 
 ```bash
 python -m pytest tests/ -v
@@ -179,69 +175,77 @@ tests/test_contracts.py::test_workflow_state_defaults PASSED
 tests/test_contracts.py::test_audit_event_round_trip PASSED
 tests/test_track_a_phase1.py::test_create_and_decode_token PASSED
 tests/test_track_a_phase1.py::test_issue_test_tokens PASSED
-tests/test_track_a_phase1.py::test_invalid_token_rejected PASSED
 tests/test_track_a_phase1.py::test_require_role_hierarchy PASSED
-tests/test_track_a_phase1.py::test_auth_me_endpoint PASSED
 tests/test_track_a_phase1.py::test_get_tools_matches_contract PASSED
-tests/test_track_a_phase1.py::test_get_tool_by_name PASSED
 tests/test_track_a_phase1.py::test_permissions_low_risk_all_roles PASSED
 tests/test_track_a_phase1.py::test_permissions_medium_risk_rbac PASSED
 tests/test_track_a_phase1.py::test_permissions_high_risk_rbac_and_approval PASSED
-tests/test_track_a_phase1.py::test_permissions_argument_validation PASSED
-tests/test_track_a_phase1.py::test_permissions_endpoint_http PASSED
-
-======================= 16 passed in 0.45s =======================
+tests/test_track_a_phase2.py::test_approval_creation_and_listing PASSED
+tests/test_track_a_phase2.py::test_approval_rbac_operator_and_admin_only PASSED
+tests/test_track_a_phase2.py::test_approval_rejection_flow PASSED
+tests/test_track_a_phase2.py::test_rate_limiting_enforcement PASSED
+tests/test_track_a_phase2.py::test_audit_logging_and_filtering PASSED
+tests/test_track_b_phase1.py::test_calculator_end_to_end PASSED
+tests/test_track_b_phase1.py::test_file_reader_end_to_end PASSED
+tests/test_track_b_phase2.py::test_create_ticket_pauses_and_resumes PASSED
 ```
+
+---
+
+## Running the Guardrail API Service
+
+To start the Guardrail governance service locally:
+
+```bash
+uvicorn track-a-guardrail.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Once running, interactive OpenAPI documentation is available at:
+`http://127.0.0.1:8000/docs`
 
 ---
 
 ## API Reference
 
-Start the Guardrail service locally:
-
-```bash
-uvicorn track-a-guardrail.main:app --reload --port 8000
-```
-
-### Key Endpoints
-
-| Method | Path | Description | Access Control |
-|---|---|---|---|
+| HTTP Method | Route | Description | Authorization Requirement |
+| :--- | :--- | :--- | :--- |
 | `GET` | `/health` | Service health status check | Public |
-| `GET` | `/tools` | Returns all registered tools and schemas | Public |
+| `GET` | `/tools` | Returns full registry with input/output schemas | Public |
 | `GET` | `/tools/{tool_name}` | Retrieves single tool schema | Public |
-| `POST` | `/auth/token` | Generates a JWT access token | Public |
-| `GET` | `/auth/test-tokens` | Emits pre-computed test tokens for all roles | Public (Dev) |
-| `GET` | `/auth/me` | Inspects authenticated user claims | Authenticated |
-| `POST` | `/permissions/check` | Evaluates proposed `ToolCall` deterministically | Authenticated |
+| `POST` | `/auth/token` | Issues a signed JWT for testing or service auth | Public |
+| `GET` | `/auth/test-tokens` | Returns pre-computed tokens for all 4 roles | Public (Dev Only) |
+| `GET` | `/auth/me` | Decodes caller identity and role claims | Authenticated (Bearer Token) |
+| `POST` | `/permissions/check` | Evaluates proposed tool call through 6-step gate | Authenticated (Bearer Token) |
+| `POST` | `/approvals` | Registers a pending human approval request | Authenticated (Bearer Token) |
+| `GET` | `/approvals/pending` | Lists all actions currently awaiting sign-off | Public / Operator |
+| `GET` | `/approvals/{id}` | Retrieves details of a specific approval task | Public / Operator |
+| `POST` | `/approvals/{id}/approve` | Approves action, permitting agent resumption | Restricted to Operator / Admin |
+| `POST` | `/approvals/{id}/reject` | Rejects action, terminating execution cleanly | Restricted to Operator / Admin |
+| `GET` | `/audit` | Queries audit trail with user, tool, and decision filters | Public / Auditor |
+| `GET` | `/audit/{event_id}` | Retrieves a single immutable audit event | Public / Auditor |
 
-### Example: Permission Evaluation
+---
 
-Request:
-```bash
-curl -X POST "http://localhost:8000/permissions/check" \
-  -H "Authorization: Bearer <VIEWER_JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool_name": "create_ticket",
-    "arguments": {
-      "title": "System alert",
-      "description": "Disk space warning"
-    },
-    "reasoning": "Report system issue",
-    "risk_level": "high",
-    "requires_approval": true
-  }'
-```
+## License
 
-Response:
-```json
-{
-  "decision": "denied",
-  "tool_name": "create_ticket",
-  "user_role": "viewer",
-  "risk_level": "high",
-  "requires_approval": false,
-  "reason": "Role 'viewer' is not permitted to use tool 'create_ticket'. Allowed: [operator, admin]."
-}
-```
+MIT License
+
+Copyright (c) 2026 Agent Sandbox Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

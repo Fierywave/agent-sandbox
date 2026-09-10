@@ -2,10 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 try:
+    from .approvals import router as approvals_router
+    from .audit import router as audit_router
     from .auth import router as auth_router
     from .permissions import router as permissions_router
     from .registry import router as registry_router
 except (ImportError, ValueError):
+    from approvals import router as approvals_router
+    from audit import router as audit_router
     from auth import router as auth_router
     from permissions import router as permissions_router
     from registry import router as registry_router
@@ -26,6 +30,8 @@ app.add_middleware(
 app.include_router(registry_router)
 app.include_router(auth_router)
 app.include_router(permissions_router)
+app.include_router(approvals_router)
+app.include_router(audit_router)
 
 
 @app.get("/health", tags=["Health"])
