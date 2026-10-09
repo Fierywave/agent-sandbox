@@ -1,12 +1,14 @@
-"""approval_store — a small JSON-backed index of pending approvals.
+"""approval_store — a small JSON-backed index of tasks paused for approval.
 
 This is NOT what makes pause/resume actually work — that's LangGraph's own
-checkpointer (see graph.py, SqliteSaver). This file exists only so a human
-reviewer (or a CLI/UI) can answer "what's waiting for approval right now?"
-without having to inspect LangGraph's internal checkpoint tables directly.
+checkpointer (see graph.py, SqliteSaver). It answers "which paused tasks
+are we tracking?", and in live mode it holds the link between our task and
+Track A's approval record: `approval_id` is the id of the record in Track
+A's POST /approvals. approval_sync.py reads that link to know which of
+Track A's approvals to poll for each paused task.
 
-Phase 3 swaps this for Track A's real approvals backend/table. Same idea,
-just centralized on their side instead of a local JSON file here.
+Track A's service remains the source of truth for the human's decision;
+this file only remembers which of its records belongs to which task.
 """
 
 import json
@@ -28,10 +30,18 @@ def _write_all(data: dict) -> None:
         json.dump(data, f, indent=2)
 
 
-def add_pending(task_id: str, user_id: str, role: str, tool_call: dict, reason: str) -> None:
+def add_pending(
+    task_id: str,
+    user_id: str,
+    role: str,
+    tool_call: dict,
+    reason: str,
+    approval_id: str | None = None,
+) -> None:
     data = _read_all()
     data[task_id] = {
         "task_id": task_id,
+        "approval_id": approval_id,
         "user_id": user_id,
         "role": role,
         "tool_call": tool_call,

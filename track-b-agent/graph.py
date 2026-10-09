@@ -3,6 +3,13 @@
 Nodes: intake -> plan -> tool_selection -> permission_check ->
        tool_execution -> reflection -> approval_wait -> final_response
 
+Live mode (Day-7 integration): when build_graph() is given a guardrail
+URL (the `registry_base_url` argument), permission checks go to Track A's
+real POST /permissions/check and approvals are filed in Track A's
+POST /approvals. With no URL, everything runs offline against local stubs.
+If a URL IS given but the service is unreachable, the call is DENIED
+(fail closed) rather than quietly falling back to a local policy.
+
 Phase 2: csv_query and create_ticket are now wired into
 TOOL_IMPLEMENTATIONS alongside calculator/file_reader. approval_wait is a
 REAL pause now — it calls interrupt() and the graph is compiled with a
@@ -36,6 +43,7 @@ from langgraph.types import Command, interrupt
 from contracts import Plan, ToolCall, WorkflowStatus
 
 from approval_store import add_pending, remove_pending
+from guardrail_client import GuardrailError, check_permission_live, create_approval, get_token
 from permission_client import check_permission_stub
 from planner import Planner
 from registry_client import get_tool_registry
@@ -64,6 +72,7 @@ class GraphState(TypedDict, total=False):
     status: str
     final_response: str | None
     approved_by: str | None
+    approval_id: str | None
     history: list[dict[str, Any]]
 
 
@@ -111,14 +120,69 @@ def build_graph(registry_base_url: str | None = None, db_path: str = DEFAULT_DB_
 
     def permission_check(state: GraphState) -> GraphState:
         tool_call = ToolCall.model_validate(state["tool_call"])
-        decision = check_permission_stub(tool_call, state["role"], tools_by_name)
+        live = registry_base_url is not None
+        token = None
+
+        if live:
+            # Live mode: ask Track A's real engine. Fail CLOSED on any
+            # trouble reaching it. The token is minted per call and never
+            # stored in graph state (state is persisted to the checkpoint DB).
+            try:
+                token = get_token(registry_base_url, state["user_id"], state["role"])
+                decision = check_permission_live(
+                    registry_base_url, token, tool_call, state["role"], state["task_id"]
+                )
+            except GuardrailError as exc:
+                decision = {
+                    "decision": "denied",
+                    "tool_name": tool_call.tool_name,
+                    "user_role": state["role"],
+                    "risk_level": tool_call.risk_level.value,
+                    "requires_approval": False,
+                    "reason": f"Guardrail service unavailable, call denied (fail closed): {exc}",
+                }
+        else:
+            decision = check_permission_stub(tool_call, state["role"], tools_by_name)
+
         state["permission_result"] = decision
         state["history"].append({"node": "permission_check", "output": decision})
 
         if decision["decision"] != "allowed":
             state["status"] = WorkflowStatus.REJECTED.value
             state["final_response"] = f"Request denied: {decision['reason']}"
-        elif decision.get("requires_approval"):
+            return state
+
+        if decision.get("requires_approval"):
+            # File the approval request HERE, not inside approval_wait:
+            # LangGraph re-runs a paused node from its first line when it
+            # resumes, so anything with side effects placed before
+            # interrupt() would run twice (a duplicate approval request).
+            approval_id = None
+            if live:
+                try:
+                    record = create_approval(
+                        registry_base_url,
+                        token,
+                        state["task_id"],
+                        state["tool_call"],
+                        decision.get("reason", ""),
+                    )
+                    approval_id = record["id"]
+                except (GuardrailError, KeyError) as exc:
+                    state["status"] = WorkflowStatus.REJECTED.value
+                    state["final_response"] = (
+                        f"Request denied: could not file approval request (fail closed): {exc}"
+                    )
+                    return state
+            state["approval_id"] = approval_id
+            add_pending(
+                task_id=state["task_id"],
+                user_id=state["user_id"],
+                role=state["role"],
+                tool_call=state["tool_call"],
+                reason=decision.get("reason", ""),
+                approval_id=approval_id,
+            )
             state["status"] = WorkflowStatus.WAITING_APPROVAL.value
         return state
 
@@ -161,19 +225,12 @@ def build_graph(registry_base_url: str | None = None, db_path: str = DEFAULT_DB_
         return state
 
     def approval_wait(state: GraphState) -> GraphState:
-        # First time we reach this node (fresh pause): record it in the
-        # local pending-approvals index so a reviewer can see it, then
-        # call interrupt() — this suspends the graph here and persists
-        # the full state via the SqliteSaver checkpointer. Execution does
-        # not continue past this line until someone resumes the same
-        # thread_id with Command(resume=...).
-        add_pending(
-            task_id=state["task_id"],
-            user_id=state["user_id"],
-            role=state["role"],
-            tool_call=state["tool_call"],
-            reason=state.get("permission_result", {}).get("reason", ""),
-        )
+        # interrupt() suspends the graph here and persists the full state
+        # via the SqliteSaver checkpointer; nothing below it runs until
+        # someone resumes the same thread_id with Command(resume=...).
+        # NOTE: this whole function re-runs from the top on resume, so it
+        # must have no side effects before interrupt() (the approval
+        # request is filed in permission_check for exactly that reason).
         decision = interrupt(
             {
                 "task_id": state["task_id"],

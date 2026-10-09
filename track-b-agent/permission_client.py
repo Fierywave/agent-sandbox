@@ -1,15 +1,19 @@
-"""permission_client — Phase 1: a LOCAL stub that replicates Track A's
-documented permission logic exactly (see HANDOFF_A_PHASE1.md), so the graph
-behaves identically once swapped to `check_permission_live` in Phase 2.
-Never let the model's own claim of "this should be fine" substitute for
-this check — it always runs before tool_execution.
+"""permission_client — the OFFLINE permission check, used only when no
+guardrail URL is configured (unit tests, working without Track A running).
+When a guardrail URL is set, graph.py calls Track A's real engine through
+guardrail_client.check_permission_live instead and this file isn't used.
 
-Track A's documented order, first failure wins:
-  1. tool must exist in the registry -> else DENIED
-  2. all `required` fields in the tool's input_schema must be present -> else DENIED
-  3. caller's role must be in tool.allowed_roles AND role's max risk
-     (ROLE_MAX_RISK) must cover the tool's risk_level -> else DENIED
-  4. otherwise ALLOWED, with requires_approval = tool.requires_approval OR risk_level == HIGH
+It mirrors Track A's permissions.py, first failure wins:
+  1. tool must exist in the registry
+  2. all `required` args present, and no args outside the schema's properties
+  3. caller's role must be in tool.allowed_roles
+  4. role's max risk (ROLE_MAX_RISK) must cover the tool's risk_level
+  5. (Track A only) sliding-window rate limit — NOT mirrored here
+  6. ALLOWED, with requires_approval = tool.requires_approval OR risk_level == HIGH
+
+tests/test_track_b_integration.py runs this against Track A's real engine
+across every role x tool x argument combination, so the two can't drift
+apart without a test failing.
 """
 
 from contracts import ROLE_MAX_RISK, Role, RiskLevel, ToolCall, ToolDefinition
@@ -53,6 +57,17 @@ def check_permission_stub(
             "reason": f"Missing required argument(s): {', '.join(missing)}",
         }
 
+    properties = tool.input_schema.get("properties", {})
+    unexpected = [k for k in tool_call.arguments if properties and k not in properties]
+    if unexpected:
+        return {
+            **base,
+            "decision": "denied",
+            "risk_level": tool.risk_level.value,
+            "requires_approval": False,
+            "reason": f"Unexpected argument(s): {', '.join(unexpected)}",
+        }
+
     try:
         role = Role(role_str)
     except ValueError:
@@ -81,21 +96,3 @@ def check_permission_stub(
         "requires_approval": requires_approval,
         "reason": "ok",
     }
-
-
-def check_permission_live(
-    registry_base_url: str, token: str, tool_call: ToolCall
-) -> dict:
-    """Phase 2: calls Track A's real POST /permissions/check. Wire this in
-    at the Day-7 sync point once Track A's approval backend is running —
-    same response shape as the stub above, so callers don't change."""
-    import requests
-
-    resp = requests.post(
-        f"{registry_base_url.rstrip('/')}/permissions/check",
-        headers={"Authorization": f"Bearer {token}"},
-        json=tool_call.model_dump(mode="json"),
-        timeout=5,
-    )
-    resp.raise_for_status()
-    return resp.json()
