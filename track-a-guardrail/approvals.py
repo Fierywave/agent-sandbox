@@ -5,13 +5,17 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from contracts.enums import ApprovalDecision, Role
+from contracts.enums import ApprovalDecision, PermissionDecision, Role
 from contracts.plan import ToolCall
 
 try:
     from .auth import TokenClaims, get_current_claims, require_role
+    from .audit import audit_logger
+    from .registry import registry
 except (ImportError, ValueError):
     from auth import TokenClaims, get_current_claims, require_role
+    from audit import audit_logger
+    from registry import registry
 
 router = APIRouter(prefix="/approvals", tags=["Approvals"])
 
@@ -40,6 +44,26 @@ class ApprovalActionRequest(BaseModel):
     note: str | None = None
 
 
+def log_approval_event(record: ApprovalRecord) -> None:
+    tool = registry.get(record.tool_call.tool_name)
+    audit_logger.create_and_log(
+        task_id=record.task_id,
+        user_id=record.user_id,
+        role=record.role.value,
+        tool_name=record.tool_call.tool_name,
+        arguments=record.tool_call.arguments,
+        risk_level=tool.risk_level if tool else record.tool_call.risk_level,
+        # Legacy required field: this event is not a permission evaluation.
+        # Consumers must use event_type to distinguish the two categories.
+        permission_decision=PermissionDecision.ALLOWED,
+        approval_decision=record.status,
+        approved_by=(record.resolved_by if record.status == ApprovalDecision.APPROVED else None),
+        event_type="approval",
+        reason=record.resolution_note if record.status != ApprovalDecision.PENDING else record.reason,
+        execution_result={"approval_id": record.id, "resolved_by": record.resolved_by},
+    )
+
+
 class ApprovalStore:
     def __init__(self):
         self._records: dict[str, ApprovalRecord] = {}
@@ -59,6 +83,7 @@ class ApprovalStore:
             created_at=datetime.now(timezone.utc),
         )
         self._records[record_id] = record
+        log_approval_event(record)
         return record
 
     def get(self, record_id: str) -> ApprovalRecord | None:
@@ -90,6 +115,7 @@ class ApprovalStore:
         record.resolved_at = datetime.now(timezone.utc)
         record.resolved_by = resolved_by
         record.resolution_note = note
+        log_approval_event(record)
         return record
 
     def clear(self) -> None:

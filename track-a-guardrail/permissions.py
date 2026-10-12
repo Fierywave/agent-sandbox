@@ -2,7 +2,7 @@ import os
 import sys
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -77,6 +77,8 @@ def evaluate_permission(
             arguments=tool_call.arguments,
             risk_level=tool_call.risk_level,
             permission_decision=res.decision,
+            event_type="permission",
+            reason=res.reason,
         )
         return res
 
@@ -99,6 +101,8 @@ def evaluate_permission(
             arguments=tool_call.arguments,
             risk_level=tool.risk_level,
             permission_decision=res.decision,
+            event_type="permission",
+            reason=res.reason,
         )
         return res
 
@@ -121,6 +125,8 @@ def evaluate_permission(
             arguments=tool_call.arguments,
             risk_level=tool.risk_level,
             permission_decision=res.decision,
+            event_type="permission",
+            reason=res.reason,
         )
         return res
 
@@ -146,6 +152,8 @@ def evaluate_permission(
             arguments=tool_call.arguments,
             risk_level=tool.risk_level,
             permission_decision=res.decision,
+            event_type="permission",
+            reason=res.reason,
         )
         return res
 
@@ -168,6 +176,8 @@ def evaluate_permission(
             arguments=tool_call.arguments,
             risk_level=tool.risk_level,
             permission_decision=res.decision,
+            event_type="permission",
+            reason=res.reason,
         )
         return res
 
@@ -193,6 +203,8 @@ def evaluate_permission(
         arguments=tool_call.arguments,
         risk_level=tool.risk_level,
         permission_decision=res.decision,
+        event_type="permission",
+        reason=res.reason,
         approval_decision=None,
     )
     return res
@@ -202,11 +214,13 @@ def evaluate_permission(
 def check_permission_endpoint(
     tool_call: ToolCall,
     claims: TokenClaims = Depends(get_current_claims),
+    task_id: str = Query(default="default-task", min_length=1, max_length=200),
 ) -> PermissionCheckResponse:
     res = evaluate_permission(
         user_role=claims.role,
         tool_call=tool_call,
         user_id=claims.sub,
+        task_id=task_id,
     )
     if res.decision == PermissionDecision.RATE_LIMITED:
         raise HTTPException(

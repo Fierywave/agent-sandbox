@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent Sandbox — Review Console</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root { color-scheme:light; --paper:#f6f4ee; --card:#fffefb; --ink:#233c32; --muted:#69736b; --line:#dcded3; --green:#264c3b; --accent:#c9ad76; --serif:'Libre Caslon Condensed',Georgia,serif; font-family:Arial,Helvetica,sans-serif; color:var(--ink); background:var(--paper); }
+      * { box-sizing:border-box; }
+      html { scroll-behavior:smooth; scroll-padding-top:30px; }
+      body { margin:0; font-size:14px; line-height:1.5; }
+      button,input,select,textarea { font:inherit; }
+      .sidebar { position:fixed; inset:0 auto 0 0; width:228px; background:#203b30; color:#f4f1e7; padding:36px 24px; display:flex; flex-direction:column; z-index:2; }
+      .brand { text-decoration:none; color:inherit; display:flex; gap:12px; align-items:center; }
+      .brand-mark { width:35px; height:42px; border:1px solid #98aa8e; border-radius:18px 18px 4px 4px; display:grid; place-items:center; font-family:var(--serif); font-size:25px; }
+      .brand strong { display:block; font-size:17px; font-weight:500; letter-spacing:.02em; }
+      .brand small { display:block; color:#b7c6b8; font-size:9px; letter-spacing:.18em; text-transform:uppercase; margin-top:3px; }
+      .nav-label { color:#aebdac; font-size:10px; letter-spacing:.17em; text-transform:uppercase; margin:58px 12px 15px; }
+      .sidebar nav { display:grid; gap:8px; }
+      .sidebar nav a { display:flex; gap:14px; color:#e0e7db; padding:13px 12px; border-radius:5px; text-decoration:none; transition:background .15s; }
+      .sidebar nav a:hover,.sidebar nav a:focus-visible { background:#355344; }
+      .sidebar nav a span { color:#a7ba9c; font-family:var(--serif); font-size:18px; }
+      body:not(.connected) .sidebar nav { opacity:.5; }
+      .sidebar-bottom { margin-top:auto; padding-top:30px; color:#bdc9b9; font-size:12px; border-top:1px solid #466050; }
+      .sidebar-bottom strong { display:block; color:#eeeadd; margin-bottom:8px; font-weight:500; }
+      .status-dot { width:7px; height:7px; background:#b6c59b; display:inline-block; border-radius:50%; margin-right:7px; }
+      main { margin-left:228px; max-width:1600px; padding:32px 48px 60px; }
+      .topline { display:flex; justify-content:space-between; gap:15px; border-bottom:1px solid var(--line); padding-bottom:20px; margin-bottom:36px; color:var(--muted); font-size:11px; letter-spacing:.06em; }
+      .topline strong { color:var(--ink); font-weight:500; }
+      .environment { border:1px solid var(--line); border-radius:20px; padding:3px 10px; font-size:10px; letter-spacing:.07em; }
+      .eyebrow { text-transform:uppercase; color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.18em; margin:0 0 12px; }
+      h1,h2,h3 { font-family:var(--serif); font-weight:400; line-height:1.08; }
+      h1 { font-size:clamp(48px,5vw,76px); letter-spacing:-.025em; margin:0 0 14px; }
+      h2 { font-size:36px; margin:0 0 12px; }
+      h3 { font-size:29px; margin:0 0 12px; overflow-wrap:anywhere; }
+      .page-intro { max-width:570px; font-size:14px; line-height:1.8; margin:0; }
+      .muted { color:var(--muted); }
+      .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:28px; margin:24px 0; scroll-margin-top:24px; }
+      #loginPanel { display:grid; grid-template-columns:1fr 1fr; padding:0; overflow:hidden; margin-top:40px; min-height:365px; }
+      .login-story { padding:38px; background:#e9edde; border-right:1px solid var(--line); position:relative; }
+      .login-story h2 { font-size:48px; max-width:310px; }
+      .login-story p { max-width:330px; }
+      .access-label { display:inline-block; margin-top:38px; font-size:10px; letter-spacing:.12em; text-transform:uppercase; border-top:1px solid #bfcab6; padding-top:18px; width:100%; }
+      #loginForm { padding:38px; display:flex; flex-direction:column; justify-content:center; }
+      #loginForm h3 { margin-bottom:10px; }
+      #loginForm .muted { font-size:12px; line-height:1.8; margin:15px 0 24px; }
+      #loginForm button { align-self:flex-start; min-width:160px; }
+      .row { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+      .between { justify-content:space-between; }
+      #workspace > .row { padding:18px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+      #identity { font-size:12px; font-weight:500; }
+      .section-head { display:flex; justify-content:space-between; gap:16px; align-items:center; }
+      .section-number { font-family:var(--serif); font-size:32px; color:#96a288; }
+      .section-description { max-width:690px; font-size:13px; margin-bottom:22px; }
+      #approvalList { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr)); gap:16px; }
+      #approvalList > p { grid-column:1/-1; border:1px dashed #cbd2c0; border-radius:6px; padding:35px 20px; text-align:center; color:var(--muted); background:#f7f8f2; }
+      .approval { border:1px solid var(--line); border-top:3px solid #9baa82; background:#fafbf6; border-radius:6px; padding:22px; min-width:0; }
+      .approval p { font-size:12px; overflow-wrap:anywhere; }
+      .approval .row { padding-top:10px; }
+      .filter-drawer { margin:20px 0; background:#f4f5ef; border:1px solid var(--line); border-radius:6px; }
+      .filter-drawer > summary { padding:15px 18px; font-size:12px; }
+      #filterForm { padding:4px 18px 20px; }
+      .filters { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-bottom:20px; }
+      label { display:block; font-size:11px; font-weight:600; color:#52604f; }
+      input,select,textarea { display:block; width:100%; margin-top:7px; padding:11px 12px; border:1px solid #cdd3c4; border-radius:5px; background:#fffefb; color:var(--ink); min-height:42px; }
+      input::placeholder,textarea::placeholder { color:#7c8579; font-weight:400; }
+      textarea { min-height:76px; resize:vertical; margin-bottom:12px; }
+      button { border:1px solid var(--green); border-radius:5px; padding:10px 16px; background:var(--green); color:#fffef8; cursor:pointer; font-size:12px; font-weight:500; transition:background .15s,transform .15s; min-height:40px; }
+      button:hover:not(:disabled) { background:#39644c; }
+      button.secondary { background:transparent; color:var(--ink); border-color:#cbd2c2; }
+      button.secondary:hover:not(:disabled) { background:#e9eddf; }
+      button.danger { background:#f6eae5; color:#913e32; border-color:#d9bdb3; }
+      button.danger:hover:not(:disabled) { background:#eed8d1; }
+      button:disabled { opacity:.45; cursor:not-allowed; }
+      :focus-visible { outline:3px solid #b49b64; outline-offset:3px; }
+      #notice { margin:18px 0; padding:12px 16px; background:#e8edde; border-left:3px solid #859967; border-radius:3px; white-space:pre-wrap; }
+      #notice:empty { padding:0; border:0; margin:20px 0; }
+      #notice.error { color:#873c32; background:#f5e9e4; border-color:#b36d5f; }
+      pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:15px; background:#eef1e8; border:1px solid #e0e5d7; border-radius:5px; max-height:320px; overflow:auto; font-size:11px; line-height:1.7; }
+      .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:6px; }
+      table { width:100%; border-collapse:collapse; text-align:left; font-size:12px; }
+      th,td { padding:15px 13px; border-bottom:1px solid #e3e6db; vertical-align:top; }
+      td { overflow-wrap:anywhere; min-width:100px; max-width:260px; }
+      th { background:#edf0e5; color:#596450; font-size:10px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; white-space:nowrap; }
+      tbody tr:last-child td { border-bottom:0; }
+      tbody tr:hover { background:#f7f8f2; }
+      #auditCount { font-size:12px; }
+      details { margin-top:10px; }
+      summary { cursor:pointer; font-weight:500; font-size:12px; }
+      #tracePanel { border-top:3px solid var(--accent); }
+      #traceEvents details { padding:14px; border:1px solid var(--line); border-radius:5px; background:#fafbf7; }
+      #traceStatus { color:var(--muted); }
+      .page-footer { display:flex; justify-content:space-between; border-top:1px solid var(--line); padding-top:20px; margin-top:36px; color:var(--muted); font-size:10px; letter-spacing:.04em; gap:15px; }
+      [hidden] { display:none!important; }
+      @media(min-width:1800px) { main { margin-right:auto; } }
+      @media(max-width:1100px) { .sidebar { width:190px; padding:30px 18px; } main { margin-left:190px; padding:28px; } .login-story,#loginForm { padding:28px; } .filters { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+      @media(max-width:760px) { .sidebar { position:static; width:100%; padding:18px 20px; flex-direction:row; justify-content:space-between; align-items:center; gap:12px; } .sidebar .nav-label,.sidebar-bottom { display:none; } .sidebar nav { display:flex; gap:2px; } .sidebar nav a { padding:8px; font-size:11px; } .sidebar nav a span { display:none; } main { margin:0; padding:22px 18px; } .topline { margin-bottom:28px; } #loginPanel { grid-template-columns:1fr; } .login-story { border-right:0; border-bottom:1px solid var(--line); } .access-label { margin-top:16px; } .panel { padding:20px; } h1 { font-size:54px; } h2 { font-size:32px; } .filters { grid-template-columns:1fr; } .page-footer { flex-direction:column; } }
+      @media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } * { transition:none!important; } }
+    </style>
+</head>
+
+<body>
+    <aside class="sidebar" aria-label="Console navigation">
+      <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">S</span><span><strong>Sandbox</strong><small>Permissioned intelligence</small></span></a>
+      <p class="nav-label">Review workspace</p>
+      <nav aria-label="Sections">
+        <a href="#approvalsSection"><span>01</span> Approvals</a>
+        <a href="#auditSection"><span>02</span> Audit trail</a>
+      </nav>
+      <div class="sidebar-bottom"><strong><span class="status-dot"></span>Local environment</strong>Human judgment.<br>Every decision accounted for.</div>
+    </aside>
+    <main>
+        <div id="top" class="topline"><span>Workspace / <strong>Governance</strong></span><span class="environment">TRACK A · LOCAL DEMO</span></div>
+        <header>
+            <p class="eyebrow">The human in the loop</p>
+            <h1>Review Console</h1>
+            <p class="page-intro muted">A considered place for consequential decisions. Review proposed actions, follow the evidence, and keep every tool accountable.</p>
+        </header>
+        <section id="loginPanel" class="panel" aria-labelledby="accessTitle">
+            <div class="login-story">
+              <p class="eyebrow">Reviewer access</p>
+              <h2 id="accessTitle">Good oversight<br>starts here.</h2>
+              <p class="muted">Your workspace for sensitive actions and the decisions behind them.</p>
+              <span class="access-label">Operator &amp; administrator access</span>
+            </div>
+            <form id="loginForm">
+                <h3>Enter your workspace</h3>
+                <p class="muted">Connect with a reviewer token from your local service.</p>
+                <label for="tokenInput">Bearer token</label>
+                <input id="tokenInput" type="password" autocomplete="off" required placeholder="Paste your access token">
+                <p class="muted">Your token stays in this tab and is cleared when you log out or reload.</p>
+                <button type="submit">Connect to console &nbsp; →</button>
+            </form>
+        </section>
+
+        <div id="notice" role="status" aria-live="polite"></div>
+
+        <div id="workspace" hidden>
+            <div class="row between">
+                <strong id="identity"></strong>
+
+                <div class="row">
+                    <button id="refreshButton" class="secondary">
+                        Refresh data
+                    </button>
+                    <button id="logoutButton" class="secondary">
+                        Log out
+                    </button>
+                </div>
+            </div>
+
+            <section id="approvalsSection" class="panel">
+                <div class="section-head"><div><p class="eyebrow">Decisions waiting for you</p><h2>Pending approvals</h2></div><span class="section-number" aria-hidden="true">01</span></div>
+                <p class="muted">
+                    Review the concrete arguments before deciding.
+                    Approval records the decision; the agent resumes when its
+                    approval synchronization runs.
+                </p>
+                <div id="approvalList"></div>
+            </section>
+
+            <section id="auditSection" class="panel">
+                <div class="section-head"><div><p class="eyebrow">A record of every decision</p><h2>Audit trail</h2></div><span class="section-number" aria-hidden="true">02</span></div>
+
+                <details class="filter-drawer" open><summary>Filter records · user, task, risk &amp; date</summary>
+                <form id="filterForm">
+                    <div class="filters">
+                        <label>
+                            User
+                            <input name="user_id" placeholder="Exact user ID">
+                        </label>
+
+                        <label>
+                            Task
+                            <input name="task_id" placeholder="Exact task ID">
+                        </label>
+
+                        <label>
+                            Tool
+                            <input name="tool_name" placeholder="Example: calculator">
+                        </label>
+
+                        <label>
+                            Risk
+                            <select name="risk_level">
+                                <option value="">All risks</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Event type
+                            <select name="event_type">
+                                <option value="">All event types</option>
+                                <option value="permission">Permission</option>
+                                <option value="approval">Approval</option>
+                                <option value="execution">Execution</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            From — your local time
+                            <input name="start" type="datetime-local" step="1">
+                        </label>
+
+                        <label>
+                            Through — your local time
+                            <input name="end" type="datetime-local" step="1">
+                        </label>
+                    </div>
+
+                    <div class="row">
+                        <button type="submit">Apply filters</button>
+                        <button type="reset" class="secondary">Clear filters</button>
+                    </div>
+                </form></details>
+
+                <p id="auditCount" class="muted"></p>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>User / task</th>
+                                <th>Tool / risk</th>
+                                <th>Event / decision</th>
+                                <th>Reason</th>
+                                <th>Inspect</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditRows"></tbody>
+                    </table>
+                </div>
+
+                <div class="row" style="margin-top:16px">
+                    <button id="previousButton" class="secondary">Previous</button>
+                    <button id="nextButton" class="secondary">Next</button>
+                </div>
+            </section>
+
+            <section id="tracePanel" class="panel" hidden>
+                <h2 id="traceTitle">Task trace</h2>
+                <p id="traceStatus"></p>
+                <div id="traceEvents"></div>
+            </section>
+        </div>
+        <footer class="page-footer"><span>AGENT SANDBOX / GOVERNANCE CONSOLE</span><span>Local demo · Records clear when the service restarts.</span></footer>
+    </main>
+
+    <script>
+        const $ = id => document.getElementById(id);
+
+        let token = "";
+        let busy = false;
+        let offset = 0;
+        let total = 0;
+        let activeFilters = new URLSearchParams();
+
+        const pageSize = 25;
+
+        function notify(message, error = false) {
+            $("notice").textContent = message;
+            $("notice").classList.toggle("error", error);
+        }
+
+        function element(tag, text, className) {
+            const node = document.createElement(tag);
+            if (text !== undefined) node.textContent = text;
+            if (className) node.className = className;
+            return node;
+        }
+
+        function jsonBlock(value) {
+            return element("pre", JSON.stringify(value, null, 2));
+        }
+
+        function updateButtons() {
+            document.querySelectorAll("button").forEach(button => {
+                button.disabled = busy;
+            });
+
+            $("previousButton").disabled = busy || offset === 0;
+            $("nextButton").disabled = busy || offset + pageSize >= total;
+        }
+
+        function logout() {
+            document.body.classList.remove("connected");
+            token = "";
+            offset = 0;
+            total = 0;
+            activeFilters = new URLSearchParams();
+
+            $("tokenInput").value = "";
+            $("filterForm").reset();
+            $("identity").textContent = "";
+            $("approvalList").replaceChildren();
+            $("auditRows").replaceChildren();
+            $("auditCount").textContent = "";
+            $("traceEvents").replaceChildren();
+            $("traceStatus").textContent = "";
+            $("tracePanel").hidden = true;
+            $("workspace").hidden = true;
+            $("loginPanel").hidden = false;
+        }
+
+        async function api(path, options = {}) {
+            const response = await fetch(path, {
+                ...options,
+                cache: "no-store",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                    ...(options.headers || {})
+                }
+            });
+
+            const body = await response.json().catch(() => null);
+
+            if (!response.ok) {
+                const detail = body?.detail;
+                const message = typeof detail === "string"
+                    ? detail
+                    : detail
+                        ? JSON.stringify(detail)
+                        : `Request failed (${response.status})`;
+
+                if (response.status === 401) logout();
+
+                const error = new Error(message);
+                error.status = response.status;
+                throw error;
+            }
+
+            return body;
+        }
+
+        async function perform(action) {
+            if (busy) return;
+
+            busy = true;
+            notify("");
+            updateButtons();
+
+            try {
+                await action();
+            } catch (error) {
+                notify(error.message || "The request failed.", true);
+            } finally {
+                busy = false;
+                updateButtons();
+            }
+        }
+
+        async function loadApprovals() {
+            const records = await api("/dashboard/api/approvals");
+            const container = $("approvalList");
+
+            container.replaceChildren();
+
+            if (!records.length) {
+                container.append(element("p", "No approvals are waiting."));
+                return;
+            }
+
+            for (const record of records) {
+                const card = element("article", undefined, "approval");
+
+                card.append(
+                    element("h3", record.tool_call.tool_name),
+                    element(
+                        "p",
+                        `Risk: ${record.registry_risk_level} · ` +
+                        `Requested by: ${record.user_id} · Task: ${record.task_id}`
+                    ),
+                    element("p", `Planner explanation: ${record.tool_call.reasoning}`),
+                    element("p", `Approval reason: ${record.reason || "Not provided"}`),
+                    jsonBlock(record.tool_call.arguments)
+                );
+
+                const label = element("label", "Reviewer note");
+                const note = element("textarea");
+                note.maxLength = 2000;
+                note.placeholder = "Explain your decision";
+                label.append(note);
+                card.append(label);
+
+                const controls = element("div", undefined, "row");
+
+                for (const action of ["approve", "reject"]) {
+                    const button = element(
+                        "button",
+                        action === "approve" ? "Approve" : "Reject",
+                        action === "reject" ? "danger" : ""
+                    );
+
+                    button.type = "button";
+
+                    button.addEventListener("click", () => perform(async () => {
+                        const message =
+                            `${action === "approve" ? "Approve" : "Reject"} ` +
+                            `${record.tool_call.tool_name} for task ${record.task_id}?`;
+
+                        if (!window.confirm(message)) return;
+
+                        try {
+                            await api(
+                                `/approvals/${encodeURIComponent(record.id)}/${action}`,
+                                {
+                                    method: "POST",
+                                    body: JSON.stringify({ note: note.value.trim() || null })
+                                }
+                            );
+                        } catch (error) {
+                            // Another reviewer may already have resolved the request.
+                            if ([400, 404, 409].includes(error.status)) {
+                                await loadApprovals();
+                            }
+                            throw error;
+                        }
+
+                        const savedMessage = action === "approve"
+                            ? "Approval saved. The agent resumes when approval synchronization runs."
+                            : "Rejection saved.";
+
+                        try {
+                            await refreshData();
+                            notify(savedMessage);
+                        } catch (error) {
+                            notify(
+                                `${savedMessage} Refresh failed: ${error.message}`,
+                                true
+                            );
+                        }
+                    }));
+
+                    controls.append(button);
+                }
+
+                card.append(controls);
+                container.append(card);
+            }
+
+            updateButtons();
+        }
+
+        function decisionText(event) {
+            if (event.event_type === "approval") {
+                return event.approval_decision || "unknown";
+            }
+
+            if (event.event_type === "execution") {
+                return event.execution_error ? "failed" : "reported";
+            }
+
+            return event.permission_decision;
+        }
+
+        async function showTrace(taskId) {
+            $("tracePanel").hidden = false;
+            $("traceTitle").textContent = `Trace · ${taskId}`;
+            $("traceStatus").textContent = "Loading…";
+            $("traceEvents").replaceChildren();
+
+            try {
+                const trace = await api(`/trace/${encodeURIComponent(taskId)}`);
+
+                $("traceStatus").textContent =
+                    `Status: ${trace.status} · ${trace.spans.length} recorded events`;
+
+                if (!trace.spans.length) {
+                    $("traceEvents").append(element("p", "No events recorded yet."));
+                }
+
+                trace.spans.forEach((span, index) => {
+                    const details = element("details");
+
+                    let title = `${index + 1}. ${span.node}`;
+
+                    if (span.step !== null && span.step !== undefined) {
+                        title += ` · step ${span.step}`;
+                    }
+
+                    if (span.attempt !== null && span.attempt !== undefined) {
+                        title += ` · attempt ${span.attempt}`;
+                    }
+
+                    details.append(
+                        element("summary", title),
+                        jsonBlock(span)
+                    );
+
+                    $("traceEvents").append(details);
+                });
+            } catch (error) {
+                $("traceStatus").textContent = error.status === 404
+                    ? "No trace has been received for this task yet."
+                    : `Could not load trace: ${error.message}`;
+
+                if (error.status !== 404) throw error;
+            }
+
+            $("tracePanel").scrollIntoView({ behavior: "smooth" });
+        }
+
+        async function loadAudit() {
+            const params = new URLSearchParams(activeFilters);
+            params.set("offset", offset);
+            params.set("limit", pageSize);
+
+            const data = await api(`/dashboard/api/audit?${params}`);
+
+            total = data.total;
+
+            const rows = $("auditRows");
+            rows.replaceChildren();
+
+            if (!data.items.length) {
+                const row = element("tr");
+                const cell = element("td", "No audit events match these filters.");
+                cell.colSpan = 6;
+                row.append(cell);
+                rows.append(row);
+            }
+
+            for (const event of data.items) {
+                const row = element("tr");
+
+                row.append(
+                    element("td", new Date(event.timestamp).toLocaleString()),
+                    element("td", `${event.user_id} / ${event.task_id}`),
+                    element("td", `${event.tool_name} / ${event.risk_level}`),
+                    element("td", `${event.event_type} / ${decisionText(event)}`),
+                    element("td", event.reason || "—")
+                );
+
+                const inspect = element("td");
+                const button = element("button", "Trace", "secondary");
+                button.type = "button";
+
+                button.addEventListener("click", () => perform(
+                    () => showTrace(event.task_id)
+                ));
+
+                const details = element("details");
+                details.append(
+                    element("summary", "Audit record"),
+                    jsonBlock(event)
+                );
+
+                inspect.append(button, details);
+                row.append(inspect);
+                rows.append(row);
+            }
+
+            $("auditCount").textContent = data.items.length
+                ? `Showing ${offset + 1}–${offset + data.items.length} of ${total}`
+                : `${total} matching events`;
+
+            updateButtons();
+        }
+
+        async function refreshData() {
+            await loadApprovals();
+            await loadAudit();
+        }
+
+        $("loginForm").addEventListener("submit", event => {
+            event.preventDefault();
+
+            perform(async () => {
+                token = $("tokenInput").value.trim().replace(/^Bearer\s+/i, "");
+
+                let identity;
+
+                try {
+                    identity = await api("/auth/me");
+
+                    if (!["operator", "admin"].includes(identity.role)) {
+                        throw new Error("This console requires an operator or admin token.");
+                    }
+                } catch (error) {
+                    logout();
+                    throw error;
+                }
+
+                $("tokenInput").value = "";
+                $("identity").textContent = `${identity.sub} · ${identity.role}`;
+                $("loginPanel").hidden = true;
+                $("workspace").hidden = false;
+                document.body.classList.add("connected");
+
+                await refreshData();
+                notify("Connected.");
+            });
+        });
+
+        $("logoutButton").addEventListener("click", () => {
+            logout();
+            notify("Logged out.");
+        });
+
+        $("refreshButton").addEventListener("click", () => perform(refreshData));
+
+        $("filterForm").addEventListener("submit", event => {
+            event.preventDefault();
+
+            perform(async () => {
+                const nextFilters = new URLSearchParams();
+                const values = new FormData($("filterForm"));
+
+                for (const [name, raw] of values.entries()) {
+                    const value = String(raw).trim();
+                    if (!value) continue;
+
+                    nextFilters.set(
+                        name,
+                        name === "start" || name === "end"
+                            ? new Date(value).toISOString()
+                            : value
+                    );
+                }
+
+                if (
+                    nextFilters.has("start") &&
+                    nextFilters.has("end") &&
+                    nextFilters.get("start") > nextFilters.get("end")
+                ) {
+                    throw new Error("Start time must be before or equal to end time.");
+                }
+
+                activeFilters = nextFilters;
+                offset = 0;
+                await loadAudit();
+            });
+        });
+
+        $("filterForm").addEventListener("reset", () => {
+            perform(async () => {
+                activeFilters = new URLSearchParams();
+                offset = 0;
+                await loadAudit();
+            });
+        });
+
+        $("previousButton").addEventListener("click", () => perform(async () => {
+            offset = Math.max(0, offset - pageSize);
+            await loadAudit();
+        }));
+
+        $("nextButton").addEventListener("click", () => perform(async () => {
+            offset += pageSize;
+            await loadAudit();
+        }));
+    </script>
+</body>
+
+</html>

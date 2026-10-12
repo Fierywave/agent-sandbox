@@ -1,14 +1,7 @@
-"""AuditEvent schema.
-
-Owned by Track A. Every tool request — allowed, denied, rate-limited,
-pending, approved, rejected, executed, or failed — gets written as one
-of these. This table is the answer to "why did the agent do that?", so
-don't drop fields to save space; storage is cheap, an unreconstructable
-decision is not.
-"""
+"""Shared audit event schema used by Track A and Track B."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,8 +21,10 @@ class AuditEvent(BaseModel):
     risk_level: RiskLevel
 
     permission_decision: PermissionDecision
+
     approval_decision: ApprovalDecision | None = Field(
-        default=None, description="Only set for tools requiring approval"
+        default=None,
+        description="Only set for tools requiring approval",
     )
     approved_by: str | None = None
 
@@ -37,3 +32,8 @@ class AuditEvent(BaseModel):
     execution_error: str | None = None
 
     latency_ms: float | None = None
+
+    event_type: Literal[
+        "permission", "approval", "execution"
+    ] = "permission"
+    reason: str | None = None

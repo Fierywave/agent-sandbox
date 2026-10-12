@@ -115,14 +115,16 @@ python -m pytest tests/ -v
 
 ## Running the Guardrail API Service
 
-To launch the FastAPI guardrail service locally:
+From the repository root, with your virtual environment activated, launch the FastAPI guardrail service:
 
 ```bash
-uvicorn track-a-guardrail.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn track-a-guardrail.main:app --host 127.0.0.1 --port 8000
 ```
 
-Once running, the interactive OpenAPI documentation is available at:
-`http://127.0.0.1:8000/docs`
+Open the [review dashboard](http://127.0.0.1:8000/dashboard) or the
+[interactive API documentation](http://127.0.0.1:8000/docs).
+The root URL `/` has no page. Use one worker: the current guardrail stores
+are in memory, and restarting the service clears their data.
 
 ---
 
@@ -146,6 +148,38 @@ Once running, the interactive OpenAPI documentation is available at:
 | `GET` | `/audit/{event_id}` | Retrieves a single immutable audit event | Public / Auditor |
 
 ---
+
+## Observability and Review Dashboard
+
+The review dashboard provides an operator/admin approval queue, reviewer
+notes, a paginated audit table, date and task filters, and inspection of
+available task traces. Connect using a local development operator or admin
+Bearer token. Approval decisions are saved by the service; the agent resumes
+when its approval synchronization runs.
+
+| HTTP Method | Route | Purpose | Access |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/dashboard` | Review console page | Public page; data requires authentication |
+| `GET` | `/dashboard/api/approvals` | Pending approval queue | Operator / Admin |
+| `GET` | `/dashboard/api/audit` | Filtered, paginated audit records | Operator / Admin |
+| `POST` | `/trace/{task_id}` | Submit a full task history snapshot | Authenticated; existing trace identity must match |
+| `GET` | `/trace/{task_id}` | Retrieve a task timeline | Task owner / Operator / Admin |
+| `GET` | `/analytics/summary` | Permission, approval, and reported execution metrics | Operator / Admin |
+
+Trace submissions contain `status` and `spans`. Identical snapshots can be
+resent safely; subsequent snapshots must preserve earlier events and append
+new ones. Missing node timings remain unset. Analytics counts clarification
+separately from completion and failure, and distinguishes tool attempts from
+task outcomes.
+
+Permission requests accept `?task_id=...`, and `/audit` supports the same
+filter. Dashboard audit date filters use timezone-aware `start` and `end`
+values with inclusive bounds.
+
+Automatic agent trace publishing and complete node timing remain pending.
+Durable PostgreSQL storage and Redis-backed rate limiting are not yet wired
+into the guardrail service. Development token issuance is intended for local
+use; the older audit and approval-read endpoints remain public.
 
 ## License
 

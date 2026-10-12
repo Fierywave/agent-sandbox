@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
+from typing import Any, Literal
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
 
 from contracts.audit_event import AuditEvent
 from contracts.enums import ApprovalDecision, PermissionDecision, RiskLevel
+
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -32,6 +33,10 @@ class AuditLogger:
         execution_result: dict[str, Any] | None = None,
         execution_error: str | None = None,
         latency_ms: float | None = None,
+        event_type: Literal[
+            "permission", "approval", "execution"
+        ] = "permission",
+        reason: str | None = None,
     ) -> AuditEvent:
         event = AuditEvent(
             event_id=str(uuid.uuid4()),
@@ -48,8 +53,17 @@ class AuditLogger:
             execution_result=execution_result,
             execution_error=execution_error,
             latency_ms=latency_ms,
+            event_type=event_type,
+            reason=reason,
         )
         return self.log(event)
+
+    def snapshot(self) -> list[AuditEvent]:
+        """Return copies of all events for analytics."""
+        return [
+            event.model_copy(deep=True)
+            for event in self._events
+        ]
 
     def query(
         self,
@@ -59,20 +73,46 @@ class AuditLogger:
         risk_level: RiskLevel | None = None,
         permission_decision: PermissionDecision | None = None,
         limit: int = 100,
+        task_id: str | None = None,
     ) -> list[AuditEvent]:
         results = self._events
+
+        if task_id is not None:
+            results = [
+                event for event in results
+                if event.task_id == task_id
+            ]
+
         if user_id:
-            results = [e for e in results if e.user_id == user_id]
+            results = [
+                event for event in results
+                if event.user_id == user_id
+            ]
+
         if role:
-            results = [e for e in results if e.role == role]
+            results = [
+                event for event in results
+                if event.role == role
+            ]
+
         if tool_name:
-            results = [e for e in results if e.tool_name == tool_name]
+            results = [
+                event for event in results
+                if event.tool_name == tool_name
+            ]
+
         if risk_level:
-            risk_val = risk_level.value if hasattr(risk_level, "value") else str(risk_level)
-            results = [e for e in results if e.risk_level == risk_level or e.risk_level.value == risk_val]
+            results = [
+                event for event in results
+                if event.risk_level == risk_level
+            ]
+
         if permission_decision:
-            decision_val = permission_decision.value if hasattr(permission_decision, "value") else str(permission_decision)
-            results = [e for e in results if e.permission_decision == permission_decision or e.permission_decision.value == decision_val]
+            results = [
+                event for event in results
+                if event.permission_decision == permission_decision
+            ]
+
         return results[-limit:]
 
     def clear(self) -> None:
@@ -90,6 +130,7 @@ def get_audit_events(
     risk_level: RiskLevel | None = Query(default=None),
     permission_decision: PermissionDecision | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
+    task_id: str | None = Query(default=None),
 ) -> list[AuditEvent]:
     return audit_logger.query(
         user_id=user_id,
@@ -98,12 +139,17 @@ def get_audit_events(
         risk_level=risk_level,
         permission_decision=permission_decision,
         limit=limit,
+        task_id=task_id,
     )
 
 
 @router.get("/{event_id}", response_model=AuditEvent)
 def get_audit_event(event_id: str) -> AuditEvent:
-    for event in audit_logger._events:
+    for event in audit_logger.snapshot():
         if event.event_id == event_id:
             return event
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit event not found")
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Audit event not found",
+    )
