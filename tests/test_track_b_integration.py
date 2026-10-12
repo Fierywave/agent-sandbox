@@ -240,3 +240,23 @@ def test_mismatched_approval_is_not_acted_on(guardrail_url, tmp_path):
     [row] = sync_approvals(guardrail_url, _db(tmp_path))
     assert row["outcome"] == "mismatch"
     assert local_store.get_pending("loop-4") is not None  # still paused, tool never ran
+
+
+def test_two_step_task_shows_the_approver_the_real_customer_not_a_placeholder(guardrail_url, tmp_path):
+    paused = submit_task("multi-1", "carol", "operator",
+                         "look up customer C003 and create a ticket about them",
+                         registry_base_url=guardrail_url, db_path=_db(tmp_path))
+    assert paused["status"] == WorkflowStatus.WAITING_APPROVAL.value
+
+    record = _a("approvals").approval_store.list()[0]
+    assert record.tool_call.arguments["title"] == "Follow up with Chen Wei"  # concrete value
+
+    assert _reviewer_call(guardrail_url, record.id, "approve").status_code == 200
+    [row] = sync_approvals(guardrail_url, _db(tmp_path))
+    assert (row["outcome"], row["final_status"]) == ("approved", "completed")
+    assert "Completed 2 steps" in row["final_response"]
+
+    # Track A's audit log saw each step as its own permission decision
+    events = _a("audit").audit_logger.query(user_id="carol")
+    assert {(e.tool_name, e.permission_decision.value) for e in events} == {
+        ("csv_query", "allowed"), ("create_ticket", "allowed")}

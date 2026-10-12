@@ -23,6 +23,7 @@ class RiskLevel(str, Enum):
 class WorkflowStatus(str, Enum):
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
+    NEEDS_CLARIFICATION = "needs_clarification"
     COMPLETED = "completed"
     REJECTED = "rejected"
     FAILED = "failed"
