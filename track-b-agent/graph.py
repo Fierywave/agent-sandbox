@@ -36,7 +36,9 @@ uses plain top-level imports and expects `track-b-agent/` itself on
 `sys.path` for `contracts`.
 """
 
+import logging
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -54,6 +56,9 @@ from planner import LlmCall, Planner
 from registry_client import get_tool_registry
 from steps import UnresolvedReferenceError, check_single_result, resolve_arguments
 from tools import calculator, create_ticket, csv_query, file_reader
+from trace_publisher import publish_trace
+
+logger = logging.getLogger(__name__)
 
 TOOL_IMPLEMENTATIONS = {
     "calculator": calculator.run,
@@ -67,6 +72,15 @@ DEFAULT_DB_PATH = str((Path(__file__).parent / "approvals.db").resolve())
 # LangGraph stops a run after this many node executions (default 25). A
 # worst-case plan (5 steps, each retried) needs ~30, so raise it explicitly.
 RECURSION_LIMIT = 100
+
+# Track A freezes a trace once it reaches one of these, so intermediate
+# snapshots are sent as "running" and the real final status goes out with
+# the last node only.
+TERMINAL_STATUSES = {
+    WorkflowStatus.COMPLETED.value,
+    WorkflowStatus.REJECTED.value,
+    WorkflowStatus.FAILED.value,
+}
 
 
 class GraphState(TypedDict, total=False):
@@ -95,6 +109,7 @@ class GraphState(TypedDict, total=False):
     final_response: str | None
     approved_by: str | None
     approval_id: str | None
+    approval_requested_at: float | None
     history: list[dict[str, Any]]
 
 
@@ -115,6 +130,50 @@ def build_graph(
     tools_by_name = {t.name: t for t in tools}
     planner = Planner(tools, llm_call=llm_call)
     live = registry_base_url is not None
+    token_cache: dict[tuple[str, str], str] = {}
+
+    def token_for(user_id: str, role: str) -> str:
+        if (user_id, role) not in token_cache:
+            token_cache[(user_id, role)] = get_token(registry_base_url, user_id, role)
+        return token_cache[(user_id, role)]
+
+    def publish(state: GraphState, node_name: str) -> None:
+        """Send the history so far to Track A's trace API (live mode only).
+        Telemetry must never change the task: nothing here can raise, and
+        no tool is ever re-run to produce a trace."""
+        if not live:
+            return
+        try:
+            status = state["status"]
+            if node_name != "final_response" and status in TERMINAL_STATUSES:
+                status = WorkflowStatus.RUNNING.value
+            publish_trace(
+                registry_base_url,
+                token_for(state["user_id"], state["role"]),
+                state["task_id"],
+                status,
+                state["history"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("trace publishing failed for %s: %s", state.get("task_id"), exc)
+
+    def instrument(name: str, fn):
+        """Measure how long a node ran and stamp it on the history entry the
+        node wrote, then publish. The timing is set before the entry is ever
+        published, because Track A rejects any later change to an entry."""
+
+        def wrapped(state: GraphState) -> GraphState:
+            first_new = len(state.get("history", []))
+            started = time.perf_counter()
+            out = fn(state)
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+            for entry in out["history"][first_new:]:
+                if entry["node"] == name:
+                    entry["latency_ms"] = elapsed_ms
+            publish(out, name)
+            return out
+
+        return wrapped
 
     def risk_of(tool_name: str) -> RiskLevel:
         tool = tools_by_name.get(tool_name)
@@ -197,7 +256,8 @@ def build_graph(
             return state
         if resolved != step["arguments"]:
             state["history"].append(
-                {"node": "resolve_references", "step": idx, "output": {"arguments": resolved}}
+                {"node": "resolve_references", "step": idx,
+                 "input": {"arguments": step["arguments"]}, "output": {"arguments": resolved}}
             )
 
         tool_call = ToolCall.model_validate({**step, "arguments": resolved})
@@ -209,7 +269,7 @@ def build_graph(
             # it. The token is minted per call and never stored in graph
             # state (state is persisted to the checkpoint DB).
             try:
-                token = get_token(registry_base_url, state["user_id"], state["role"])
+                token = token_for(state["user_id"], state["role"])
                 decision = check_permission_live(
                     registry_base_url, token, tool_call, state["role"], state["task_id"]
                 )
@@ -226,7 +286,10 @@ def build_graph(
             decision = check_permission_stub(tool_call, state["role"], tools_by_name)
 
         state["permission_result"] = decision
-        state["history"].append({"node": "permission_check", "step": idx, "output": decision})
+        state["history"].append(
+            {"node": "permission_check", "step": idx, "tool_name": tool_call.tool_name,
+             "input": {"arguments": resolved}, "output": decision}
+        )
 
         if decision["decision"] != "allowed":
             state["status"] = WorkflowStatus.REJECTED.value
@@ -257,6 +320,7 @@ def build_graph(
                     )
                     return state
             state["approval_id"] = approval_id
+            state["approval_requested_at"] = time.time()
             add_pending(
                 task_id=state["task_id"],
                 user_id=state["user_id"],
@@ -281,7 +345,8 @@ def build_graph(
             )
             state["status"] = WorkflowStatus.FAILED.value
             state["history"].append(
-                {"node": "tool_execution", "step": idx, "attempt": attempt, "error": state["tool_error"]}
+                {"node": "tool_execution", "step": idx, "attempt": attempt, "tool_name": tool_call.tool_name,
+                 "input": tool_call.arguments, "error": state["tool_error"]}
             )
             return state
 
@@ -309,6 +374,8 @@ def build_graph(
                     "node": "tool_execution",
                     "step": idx,
                     "attempt": attempt,
+                    "tool_name": tool_call.tool_name,
+                    "input": tool_call.arguments,
                     "error": state["tool_error"],
                     "will_retry": will_retry,
                 }
@@ -323,7 +390,8 @@ def build_graph(
         state["attempt"] = 0
         state["step_index"] = idx + 1
         state["history"].append(
-            {"node": "tool_execution", "step": idx, "attempt": attempt, "output": result}
+            {"node": "tool_execution", "step": idx, "attempt": attempt, "tool_name": tool_call.tool_name,
+                 "input": tool_call.arguments, "output": result}
         )
 
         # The user asked for ONE record but the lookup returned several (or
@@ -356,6 +424,8 @@ def build_graph(
                 "node": "replan",
                 "step": idx,
                 "attempt": state["attempt"] + 1,
+                "tool_name": failed.tool_name,
+                "input": {"failed_step": failed.model_dump(mode="json")},
                 "error": state["tool_error"],
                 "output": new.model_dump(mode="json") if new else None,
             }
@@ -419,7 +489,13 @@ def build_graph(
             }
         )
         remove_pending(state["task_id"])
-        state["history"].append({"node": "approval_wait", "output": {"decision": decision}})
+        # Time spent waiting for a person is reported separately (waited_ms);
+        # latency_ms stays the time the node itself was actually running.
+        waited_ms = round((time.time() - state.get("approval_requested_at", time.time())) * 1000, 1)
+        state["history"].append(
+            {"node": "approval_wait", "input": {"tool_call": state["tool_call"]},
+             "output": {"decision": decision}, "waited_ms": waited_ms}
+        )
 
         if decision.get("approved"):
             state["status"] = WorkflowStatus.RUNNING.value
@@ -451,7 +527,7 @@ def build_graph(
         ("approval_wait", approval_wait),
         ("final_response", final_response_node),
     ]:
-        graph.add_node(name, fn)
+        graph.add_node(name, instrument(name, fn))
 
     graph.set_entry_point("intake")
     graph.add_edge("intake", "plan")
@@ -596,3 +672,11 @@ def run_task(
     return submit_task(
         task_id, user_id, role, user_message, registry_base_url, db_path, max_retries, llm_call
     )
+
+
+def get_task_state(task_id: str, db_path: str = DEFAULT_DB_PATH) -> GraphState | None:
+    """The saved state of a task (status, history, final response...), read
+    from the checkpoint database. Works for finished and paused tasks alike."""
+    app = build_graph(None, db_path)
+    snapshot = app.get_state({"configurable": {"thread_id": task_id}})
+    return dict(snapshot.values) if snapshot and snapshot.values else None
